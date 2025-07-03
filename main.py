@@ -110,8 +110,5 @@ async def show(ctx, member: discord.Member = None):
 # 🔁 Keep bot alive
 keep_alive()
 
-# 🤖 Run bot using TOKEN from Replit secrets
 import os
-
-bot.run(
-    "YOUR_TOKEN_HERE")
+bot.run(os.getenv("TOKEN"))
