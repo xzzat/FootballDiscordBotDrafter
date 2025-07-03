@@ -114,4 +114,4 @@ keep_alive()
 import os
 
 bot.run(
-    "MTM4OTk4MTY1OTEyMTU4NjI0Nw.Gufm9e.M72t9pjNUs_M7e2R-CqyPdBqp5_Ghg10Q3-COM")
+    "YOUR_TOKEN_HERE")
