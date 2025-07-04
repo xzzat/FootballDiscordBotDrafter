@@ -1,31 +1,42 @@
 import discord
 from discord.ext import commands
-import os
-from flask import Flask
-import threading
 
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-app = Flask('')
+teams = {}
+formations = {}
 
-# In-memory storage for user teams and formations
-user_teams = {}
-default_formation = "4-3-3"
-
-formation_positions = {
-    "4-3-3": ["GK", "LB", "CB1", "CB2", "RB", "CM1", "CM2", "CM3", "LW", "ST", "RW"],
-    "4-4-2": ["GK", "LB", "CB1", "CB2", "RB", "LM", "CM1", "CM2", "RM", "ST1", "ST2"],
-    "3-5-2": ["GK", "CB1", "CB2", "CB3", "LM", "CM1", "CM2", "CM3", "RM", "ST1", "ST2"],
-    "3-4-3": ["GK", "CB1", "CB2", "CB3", "LM", "CM1", "CM2", "RM", "LW", "ST", "RW"],
-    "5-3-2": ["GK", "LWB", "CB1", "CB2", "CB3", "RWB", "CM1", "CM2", "CM3", "ST1", "ST2"],
-    "4-2-3-1": ["GK", "LB", "CB1", "CB2", "RB", "CDM1", "CDM2", "CAM", "LW", "RW", "ST"],
-    "5-a-side 2-2": ["GK", "DEF1", "DEF2", "ATT1", "ATT2"],
-    "5-a-side 1-2-1": ["GK", "DEF", "MID1", "MID2", "ST"],
-    "7-a-side 2-3-1": ["GK", "DEF1", "DEF2", "MID1", "MID2", "MID3", "ST"],
-    "3-4-2-1": ["GK", "CB1", "CB2", "CB3", "LM", "CM1", "CM2", "RM", "LF", "RF", "ST"]
+# Default formation layout for common formations
+formation_layouts = {
+    "4-3-3": ["GK", "LB", "CB", "CB", "RB", "CM", "CM", "CM", "LW", "ST", "RW"],
+    "3-4-2-1": ["GK", "CB", "CB", "CB", "LM", "CM", "CM", "RM", "CAM", "CAM", "ST"],
+    "2-2": ["GK", "DEF", "DEF", "MID", "MID"],
+    "1-2-1": ["GK", "DEF", "MID", "MID", "ST"],
+    "3-2-1": ["GK", "DEF", "DEF", "DEF", "MID", "MID", "ST"],
+    "2-3-1": ["GK", "DEF", "DEF", "MID", "MID", "MID", "ST"],
 }
+
+position_emojis = {
+    "GK": 💪,
+    "LB": 🌟, "CB": 🔒, "RB": 🌟, "DEF": 🔒,
+    "LM": 🔹, "CM": ⚖️, "RM": 🔹, "MID": ⚖️, "CAM": 🌟,
+    "LW": 🔥, "RW": 🔥, "ST": ⚽, "CF": ⚽
+}
+
+def format_team(user_id):
+    team = teams.get(user_id, {})
+    formation = formations.get(user_id, "4-3-3")
+    layout = formation_layouts.get(formation, [])
+
+    lines = []
+    for position in layout:
+        player = team.get(position, "-")
+        emoji = position_emojis.get(position, "")
+        lines.append(f"{emoji} {position}: {player}")
+
+    return "\n".join(lines)
 
 @bot.event
 async def on_ready():
@@ -33,74 +44,46 @@ async def on_ready():
 
 @bot.command()
 async def create(ctx):
-    user_teams[ctx.author.id] = {
-        "formation": default_formation,
-        "players": {}
-    }
-    await ctx.send(f"Team created for {ctx.author.mention} with formation {default_formation}.")
+    user_id = ctx.author.id
+    teams[user_id] = {}
+    formations[user_id] = "4-3-3"
+    await ctx.send("Your team has been created!")
 
 @bot.command()
 async def setformation(ctx, *, formation):
-    formation = formation.strip()
-    if ctx.author.id not in user_teams:
-        await ctx.send("You need to create a team first using !create")
-        return
-    if formation not in formation_positions:
-        await ctx.send("Formation not supported. Example: 4-3-3, 5-a-side 2-2")
-        return
-    user_teams[ctx.author.id]['formation'] = formation
-    user_teams[ctx.author.id]['players'] = {}  # reset players on formation change
-    await ctx.send(f"Formation set to {formation} for {ctx.author.mention}.")
+    user_id = ctx.author.id
+    if formation not in formation_layouts:
+        await ctx.send(f"Invalid formation. Available: {', '.join(formation_layouts.keys())}")
+    else:
+        formations[user_id] = formation
+        await ctx.send(f"Formation set to {formation}.")
 
 @bot.command()
 async def setplayer(ctx, position, *, name):
-    if ctx.author.id not in user_teams:
-        await ctx.send("You need to create a team first using !create")
+    user_id = ctx.author.id
+    formation = formations.get(user_id, "4-3-3")
+    if position not in formation_layouts.get(formation, []):
+        await ctx.send("Invalid position for current formation.")
         return
-    formation = user_teams[ctx.author.id]['formation']
-    valid_positions = formation_positions.get(formation, [])
-    position = position.upper()
-    if position not in valid_positions:
-        await ctx.send(f"Invalid position for {formation}. Valid: {', '.join(valid_positions)}")
+    if user_id not in teams:
+        await ctx.send("Create a team first using !create")
         return
-    user_teams[ctx.author.id]['players'][position] = name
-    await ctx.send(f"Set {name} at {position} for {ctx.author.mention}.")
-
-@bot.command()
-async def show(ctx):
-    if ctx.author.id not in user_teams:
-        await ctx.send("You need to create a team first using !create")
-        return
-    team = user_teams[ctx.author.id]
-    formation = team['formation']
-    positions = formation_positions.get(formation, [])
-    players = team['players']
-    lines = [f"**{formation} Formation for {ctx.author.display_name}**"]
-    for pos in positions:
-        player = players.get(pos, "-")
-        lines.append(f"{pos}: {player}")
-    await ctx.send("\n".join(lines))
+    teams[user_id][position] = name
+    await ctx.send(f"Set {name} at {position}.")
 
 @bot.command()
 async def reset(ctx):
-    if ctx.author.id in user_teams:
-        user_teams[ctx.author.id]['players'] = {}
-        await ctx.send("Your team has been reset.")
-    else:
-        await ctx.send("You need to create a team first using !create")
+    user_id = ctx.author.id
+    teams[user_id] = {}
+    await ctx.send("Your team has been reset.")
 
-# Keep-alive server (for Render deployment)
-@app.route('/')
-def home():
-    return "Bot is running"
+@bot.command()
+async def show(ctx):
+    user_id = ctx.author.id
+    if user_id not in teams:
+        await ctx.send("Create a team first using !create")
+        return
+    team_display = format_team(user_id)
+    await ctx.send(f"```\n{team_display}\n```")
 
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    thread = threading.Thread(target=run)
-    thread.start()
-
-keep_alive()
-
-bot.run(os.getenv("DISCORD_BOT_TOKEN"))
+bot.run("YOUR_TOKEN")
