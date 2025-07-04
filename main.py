@@ -1,36 +1,33 @@
+import os
 import discord
 from discord.ext import commands
 from flask import Flask
-from threading import Thread
+import threading
 
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
 
-teams = {}  # {user_id: {name, formation, players: []}}
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-# 🟢 Flask app to keep Replit alive
-app = Flask('')
-
+# Flask setup
+app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "I'm alive!"
+    return "Bot is running!"
 
+def run_flask():
+    app.run(host="0.0.0.0", port=8080)
 
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-
-# 🔧 Discord Bot Events and Commands
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
+
+# Start Flask in a new thread
+threading.Thread(target=run_flask).start()
+
+# Start Discord bot
+bot.run(os.getenv("TOKEN"))
 
 
 @bot.command()
