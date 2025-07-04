@@ -1,92 +1,106 @@
-import os
 import discord
 from discord.ext import commands
-from keep_alive import keep_alive
+import os
+from flask import Flask
+import threading
 
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-teams = {}
+app = Flask('')
+
+# In-memory storage for user teams and formations
+user_teams = {}
+default_formation = "4-3-3"
+
+formation_positions = {
+    "4-3-3": ["GK", "LB", "CB1", "CB2", "RB", "CM1", "CM2", "CM3", "LW", "ST", "RW"],
+    "4-4-2": ["GK", "LB", "CB1", "CB2", "RB", "LM", "CM1", "CM2", "RM", "ST1", "ST2"],
+    "3-5-2": ["GK", "CB1", "CB2", "CB3", "LM", "CM1", "CM2", "CM3", "RM", "ST1", "ST2"],
+    "3-4-3": ["GK", "CB1", "CB2", "CB3", "LM", "CM1", "CM2", "RM", "LW", "ST", "RW"],
+    "5-3-2": ["GK", "LWB", "CB1", "CB2", "CB3", "RWB", "CM1", "CM2", "CM3", "ST1", "ST2"],
+    "4-2-3-1": ["GK", "LB", "CB1", "CB2", "RB", "CDM1", "CDM2", "CAM", "LW", "RW", "ST"],
+    "5-a-side 2-2": ["GK", "DEF1", "DEF2", "ATT1", "ATT2"],
+    "5-a-side 1-2-1": ["GK", "DEF", "MID1", "MID2", "ST"],
+    "7-a-side 2-3-1": ["GK", "DEF1", "DEF2", "MID1", "MID2", "MID3", "ST"],
+    "3-4-2-1": ["GK", "CB1", "CB2", "CB3", "LM", "CM1", "CM2", "RM", "LF", "RF", "ST"]
+}
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user.name}')
+    print(f'Logged in as {bot.user}')
 
 @bot.command()
-async def create(ctx, team_name, *players):
-    if ctx.author.id not in teams:
-        teams[ctx.author.id] = {}
-    teams[ctx.author.id][team_name] = {
-        "players": list(players),
-        "formation": None
+async def create(ctx):
+    user_teams[ctx.author.id] = {
+        "formation": default_formation,
+        "players": {}
     }
-    await ctx.send(f"Team `{team_name}` created with players: {', '.join(players)}")
+    await ctx.send(f"Team created for {ctx.author.mention} with formation {default_formation}.")
 
 @bot.command()
-async def setformation(ctx, team_name, *, formation):
-    user_teams = teams.get(ctx.author.id, {})
-    team = user_teams.get(team_name)
-
-    if not team:
-        await ctx.send(f"No team found with name `{team_name}`.")
+async def setformation(ctx, *, formation):
+    formation = formation.strip()
+    if ctx.author.id not in user_teams:
+        await ctx.send("You need to create a team first using !create")
         return
-
-    team["formation"] = formation
-    await ctx.send(f"Formation `{formation}` set for team `{team_name}`.")
-
-@bot.command(name="show")
-async def show_team(ctx):
-    user_id = str(ctx.author.id)
-    if user_id not in teams:
-        await ctx.send("You don't have a team yet. Use `!create [Team Name]` to start.")
-        return
-
-    team = teams[user_id]
-    formation = team["formation"]
-    players = team["players"]
-
     if formation not in formation_positions:
-        await ctx.send("Your formation is not recognized.")
+        await ctx.send("Formation not supported. Example: 4-3-3, 5-a-side 2-2")
         return
+    user_teams[ctx.author.id]['formation'] = formation
+    user_teams[ctx.author.id]['players'] = {}  # reset players on formation change
+    await ctx.send(f"Formation set to {formation} for {ctx.author.mention}.")
 
-    positions = formation_positions[formation]
-    position_labels = {
-        "GK": "🧤 GK",
-        "LB": "🛡️ LB",
-        "CB": "🛡️ CB",
-        "RB": "🛡️ RB",
-        "LWB": "🛡️ LWB",
-        "RWB": "🛡️ RWB",
-        "CDM": "🎯 CDM",
-        "CM": "🎯 CM",
-        "CAM": "🎯 CAM",
-        "LM": "🎯 LM",
-        "RM": "🎯 RM",
-        "LW": "⚽ LW",
-        "RW": "⚽ RW",
-        "ST": "⚽ ST",
-        "CF": "⚽ CF"
-    }
+@bot.command()
+async def setplayer(ctx, position, *, name):
+    if ctx.author.id not in user_teams:
+        await ctx.send("You need to create a team first using !create")
+        return
+    formation = user_teams[ctx.author.id]['formation']
+    valid_positions = formation_positions.get(formation, [])
+    position = position.upper()
+    if position not in valid_positions:
+        await ctx.send(f"Invalid position for {formation}. Valid: {', '.join(valid_positions)}")
+        return
+    user_teams[ctx.author.id]['players'][position] = name
+    await ctx.send(f"Set {name} at {position} for {ctx.author.mention}.")
 
-    # Sort by vertical order: GK → Defenders → Midfielders → Attackers
-    order = {
-        "GK": 0, "LB": 1, "LWB": 1, "CB": 2, "RB": 3, "RWB": 3,
-        "CDM": 4, "CM": 5, "CAM": 6, "LM": 4, "RM": 6,
-        "LW": 7, "RW": 8, "ST": 9, "CF": 9
-    }
+@bot.command()
+async def show(ctx):
+    if ctx.author.id not in user_teams:
+        await ctx.send("You need to create a team first using !create")
+        return
+    team = user_teams[ctx.author.id]
+    formation = team['formation']
+    positions = formation_positions.get(formation, [])
+    players = team['players']
+    lines = [f"**{formation} Formation for {ctx.author.display_name}**"]
+    for pos in positions:
+        player = players.get(pos, "-")
+        lines.append(f"{pos}: {player}")
+    await ctx.send("\n".join(lines))
 
-    sorted_positions = sorted(positions, key=lambda x: order.get(x, 100))
+@bot.command()
+async def reset(ctx):
+    if ctx.author.id in user_teams:
+        user_teams[ctx.author.id]['players'] = {}
+        await ctx.send("Your team has been reset.")
+    else:
+        await ctx.send("You need to create a team first using !create")
 
-    lines = []
-    for pos in sorted_positions:
-        player = players.get(pos, "[empty]")
-        label = position_labels.get(pos, pos)
-        lines.append(f"{label}: {player}")
+# Keep-alive server (for Render deployment)
+@app.route('/')
+def home():
+    return "Bot is running"
 
-    await ctx.send("**Your Team:**\n" + "\n".join(lines))
+def run():
+    app.run(host='0.0.0.0', port=8080)
 
-    
+def keep_alive():
+    thread = threading.Thread(target=run)
+    thread.start()
+
 keep_alive()
-bot.run(os.getenv("TOKEN"))
 
+bot.run(os.getenv("DISCORD_BOT_TOKEN"))
